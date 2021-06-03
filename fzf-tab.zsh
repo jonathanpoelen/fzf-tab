@@ -176,26 +176,6 @@
   return $ret
 }
 
-fzf-tab-debug() {
-  (( $+_ftb_debug_cnt )) || typeset -gi _ftb_debug_cnt
-  local tmp=${TMPPREFIX:-/tmp/zsh}-$$-fzf-tab-$(( ++_ftb_debug_cnt )).log
-  local -i debug_fd=-1 IN_FZF_TAB=1
-  {
-    exec {debug_fd}>&2 2>| $tmp
-    local -a debug_indent; debug_indent=( '%'{3..20}'(e. .)' )
-    local PROMPT4 PS4="${(j::)debug_indent}+%N:%i> "
-    setopt xtrace
-    : $ZSH_NAME $ZSH_VERSION
-    zle .fzf-tab-orig-$_ftb_orig_widget
-    unsetopt xtrace
-    if (( debug_fd != -1 )); then
-      zle -M "fzf-tab-debug: Trace output left in $tmp"
-    fi
-  } always {
-    (( debug_fd != -1 )) && exec 2>&$debug_fd {debug_fd}>&-
-  }
-}
-
 fzf-tab-complete() {
   # this name must be ugly to avoid clashes
   local -i _ftb_continue=1 _ftb_accept=0 ret=0
@@ -228,7 +208,6 @@ fzf-tab-complete() {
 # this make it possible to call the wrapper function without causing any other side effects.
 fzf-tab-dummy() { }
 
-zle -N fzf-tab-debug
 zle -N fzf-tab-complete
 zle -N fzf-tab-dummy
 
@@ -288,7 +267,6 @@ enable-fzf-tab() {
 
   zstyle ':completion:*' list-grouped false
   bindkey '^I'  fzf-tab-complete
-  bindkey '^X.' fzf-tab-debug
 
   # make sure we can copy them
   autoload +X -Uz _main_complete _approximate
@@ -317,20 +295,12 @@ toggle-fzf-tab() {
   emulate -L zsh -o extended_glob
   if (( $+_ftb_orig_widget )); then
     disable-fzf-tab
+    zstyle -d ':completion:complete:*:options'
   else
     enable-fzf-tab
+    zstyle ':completion:complete:*:options' sort false
+    fzf-tab-complete
   fi
-}
-
-build-fzf-tab-module() {
-  local MACOS
-  if [[ ${OSTYPE} == darwin* ]]; then
-    MACOS=true
-  fi
-  pushd $FZF_TAB_HOME/modules
-  CPPFLAGS=-I/usr/local/include CFLAGS="-g -Wall -O2" LDFLAGS=-L/usr/local/lib ./configure --disable-gdbm --without-tcsetpgrp ${MACOS:+DL_EXT=bundle}
-  make -j
-  popd
 }
 
 zmodload zsh/zutil
@@ -340,8 +310,6 @@ zmodload -F zsh/stat b:zstat
 0="${${ZERO:-${0:#$ZSH_ARGZERO}}:-${(%):-%N}}"
 0="${${(M)0:#/*}:-$PWD/$0}"
 FZF_TAB_HOME="${0:A:h}"
-
-source "$FZF_TAB_HOME"/lib/zsh-ls-colors/ls-colors.zsh fzf-tab-lscolors
 
 typeset -ga _ftb_group_colors=(
   $'\x1b[94m' $'\x1b[32m' $'\x1b[33m' $'\x1b[35m' $'\x1b[31m' $'\x1b[38;5;27m' $'\x1b[36m'
@@ -382,8 +350,18 @@ typeset -ga _ftb_group_colors=(
 }
 
 enable-fzf-tab
-zle -N toggle-fzf-tab
 
 # restore options
 (( ${#_ftb_opts} )) && setopt ${_ftb_opts[@]}
 'builtin' 'unset' '_ftb_opts'
+
+# cd $modules
+# CPPFLAGS=-I/usr/local/include CFLAGS='-g -Wall -O2' LDFLAGS='-L/usr/local/lib -flto' ./configure --disable-gdbm --without-tcsetpgrp
+
+zstyle ':fzf-tab:*' fzf-bindings 'space:toggle+down'
+zstyle ':fzf-tab:complete:(kill|ps):argument-rest' fzf-preview \
+  '[[ $group == $'\''\e[37mCompleting \e[31mprocess ID\e[0m'\'' ]] &&
+    ps --pid=$word -o cmd --no-headers -w -w'
+zstyle ':fzf-tab:complete:(kill|ps):argument-rest' fzf-flags --preview-window=down:3:wrap
+
+fzf-tab-complete
